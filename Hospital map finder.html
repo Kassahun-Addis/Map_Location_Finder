@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospitals in Addis Ababa</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 800px;
+            width: 100%;
+        }
+        .info {
+            padding: 10px;
+            background: white;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 5px;
+        }
+        .info h4 {
+            margin: 0 0 5px;
+            color: #333;
+        }
+        .direction-item {
+            padding: 10px;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .current-location {
+            background-color: #d4edda;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-4">
+                <div id="sidebar" class="p-3">
+                    <h2>Nearby Hospitals</h2>
+                    <table id="nearbyStationsTable" class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Distance (km)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Dynamic content will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div id="map"></div>
+                <div id="directions" class="p-3"></div>
+            </div>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <script src="https://unpkg.com/leaflet.locatecontrol/dist/L.Control.Locate.min.js"></script>
+    <script>
+        const map = L.map('map', {
+            attributionControl: false
+        }).setView([9.0268706, 38.756477], 12);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const hospitalIcon = L.divIcon({
+            html: '<i class="fas fa-hospital fa-2x" style="color: blue;"></i>',
+            iconSize: [32, 32],
+            className: 'my-custom-icon'
+        });
+
+        let locations = []; // Declare locations globally
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of the Earth in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = 
+                0.5 - Math.cos(dLat)/2 + 
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                (1 - Math.cos(dLon))/2;
+            return R * 2 * Math.asin(Math.sqrt(a));
+        }
+
+        function fetchNearbyHospitals(userLat, userLng) {
+            const radius = 20000; // 5 km radius
+            const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];node[amenity=hospital](around:${radius},${userLat},${userLng});out;`;
+
+            fetch(overpassUrl)
+                .then(response => response.json())
+                .then(data => {
+                    locations = data.elements.map(element => ({
+                        name: element.tags.name || 'Unnamed Hospital',
+                        lat: element.lat,
+                        lng: element.lon
+                    }));
+                    updateTableAndMap(userLat, userLng, locations);
+                })
+                .catch(error => {
+                    console.error('Error fetching nearby hospitals:', error);
+                });
+        }
+
+                function updateTableAndMap(userLat, userLng, locations) {
+            const nearbyTableBody = document.getElementById('nearbyStationsTable').getElementsByTagName('tbody')[0];
+            nearbyTableBody.innerHTML = '';
+
+            // Calculate distances and add to locations array
+            locations.forEach(location => {
+                location.distance = calculateDistance(userLat, userLng, location.lat, location.lng);
+            });
+
+            // Sort locations by distance
+            locations.sort((a, b) => a.distance - b.distance);
+
+            const bounds = [];
+
+            locations.forEach((location, index) => {
+                const marker = L.marker([location.lat, location.lng], { icon: hospitalIcon }).addTo(map);
+                let popupContent = `<div class="info"><h4>${location.name}</h4><p>${location.lat}, ${location.lng}</p>`;
+                popupContent += `<button class="btn btn-primary" onclick="routeTo(${location.lat}, ${location.lng})">Get Directions</button></div>`;
+                marker.bindPopup(popupContent);
+
+                const row = nearbyTableBody.insertRow();
+                const nameCell = row.insertCell(0);
+                const distanceCell = row.insertCell(1);
+                
+                nameCell.innerHTML = `<a href="#" onclick="showLocation(${index}); return false;" style="color: blue; text-decoration: underline;">${location.name}</a>`;
+                distanceCell.textContent = location.distance.toFixed(2);
+
+                bounds.push([location.lat, location.lng]);
+            });
+
+            map.fitBounds(bounds);
+        }
+
+        function showLocation(index) {
+            const location = locations[index]; // Access the global locations array
+            map.setView([location.lat, location.lng], 15);
+            
+            // Remove existing markers to prevent clutter
+            map.eachLayer(layer => {
+                if (layer instanceof L.Marker && layer !== hospitalIcon) {
+                    map.removeLayer(layer);
+                }
+            });
+
+            // Use the custom icon for hospital markers
+            const marker = L.marker([location.lat, location.lng], { icon: hospitalIcon }).addTo(map);
+            let popupContent = `<div class="info"><h4>${location.name}</h4><p>${location.lat}, ${location.lng}</p></div>`;
+            marker.bindPopup(popupContent).openPopup();
+        }
+
+        let currentInstructionIndex = 0;
+        let instructions = [];
+
+        function routeTo(lat, lng) {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const userLat = position.coords.latitude;
+                    const userLng = position.coords.longitude;
+
+                    const control = L.Routing.control({
+                        waypoints: [
+                            L.latLng(userLat, userLng),
+                            L.latLng(lat, lng)
+                        ],
+                        routeWhileDragging: true,
+                        createMarker: function(i, waypoint, n) {
+                            const marker = L.marker(waypoint.latLng, {
+                                draggable: true,
+                                bounceOnAdd: true,
+                                bounceOnAddOptions: {duration: 500, height: 100},
+                                icon: L.icon({
+                                    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+                                    iconSize: [25, 41],
+                                    iconAnchor: [12, 41],
+                                    popupAnchor: [1, -34],
+                                    shadowSize: [41, 41]
+                                })
+                            });
+                            return marker;
+                        }
+                    }).addTo(map);
+
+                    control.on('routesfound', function(e) {
+                        const routes = e.routes;
+                        instructions = routes[0].instructions;
+                        currentInstructionIndex = 0;
+                        speak(instructions[currentInstructionIndex].text);
+                        displayDirections(routes[0]);
+                    });
+
+                    control.on('waypointschanged', function(e) {
+                        if (currentInstructionIndex < instructions.length) {
+                            const nextInstruction = instructions[currentInstructionIndex];
+                            const distanceToNextInstruction = calculateDistance(
+                                e.waypoints[0].latLng.lat,
+                                e.waypoints[0].latLng.lng,
+                                nextInstruction.latLng.lat,
+                                nextInstruction.latLng.lng
+                            );
+                            if (distanceToNextInstruction < 0.05) { // 50 meters
+                                speak(nextInstruction.text);
+                                currentInstructionIndex++;
+                                highlightCurrentInstruction(currentInstructionIndex);
+                            }
+                        }
+                    });
+                }, () => {
+                    alert('Geolocation failed. Please enable location services.');
+                });
+            } else {
+                alert('Geolocation is not supported by this browser.');
+            }
+        }
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function displayDirections(route) {
+            const directionsContainer = document.getElementById('directions');
+            directionsContainer.innerHTML = '';
+
+            route.instructions.forEach((instruction, index) => {
+                const directionItem = document.createElement('div');
+                directionItem.className = 'direction-item';
+                directionItem.id = `instruction-${index}`;
+                directionItem.innerHTML = `<p>${instruction.text}</p>`;
+                directionsContainer.appendChild(directionItem);
+            });
+        }
+
+        function highlightCurrentInstruction(index) {
+            const previousInstruction = document.querySelector('.current-location');
+            if (previousInstruction) {
+                previousInstruction.classList.remove('current-location');
+            }
+            const currentInstruction = document.getElementById(`instruction-${index}`);
+            if (currentInstruction) {
+                currentInstruction.classList.add('current-location');
+            }
+        }
+
+        function promptForLocation() {
+            const userLat = parseFloat(prompt("Enter your latitude:", "9.0268706"));
+            const userLng = parseFloat(prompt("Enter your longitude:", "38.756477"));
+            if (!isNaN(userLat) && !isNaN(userLng)) {
+                map.setView([userLat, userLng], 12);
+                fetchNearbyHospitals(userLat, userLng);
+            } else {
+                alert("Invalid coordinates. Using default location.");
+                fetchNearbyHospitals(9.0268706, 38.756477);
+            }
+        }
+
+        function handleGeolocationError() {
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            if (isMobile) {
+                alert('Geolocation failed. Please enable location services in your device settings. Go to Settings > Privacy > Location Services and enable it for your browser.');
+            } else {
+                promptForLocation();
+            }
+        }
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(position => {
+                const userLat = position.coords.latitude;
+                const userLng = position.coords.longitude;
+                map.setView([userLat, userLng], 12);
+                fetchNearbyHospitals(userLat, userLng);
+            }, handleGeolocationError);
+        } else {
+            alert('Geolocation is not supported by this browser.');
+            promptForLocation();
+        }
+
+        // Add Locate Control
+        L.control.locate({
+            position: 'topright',
+            strings: {
+                title: "Show me where I am"
+            }
+        }).addTo(map);
+    </script>
+</body>
+</html>
